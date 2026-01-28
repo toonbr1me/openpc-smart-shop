@@ -13,6 +13,23 @@ local sides = require("sides")
 -- КОНФИГУРАЦИЯ И ИНИЦИАЛИЗАЦИЯ
 -- ============================================
 
+-- ВАЖНО: Загрузка конфига с ценами ОБЯЗАТЕЛЬНА!
+local hasConfig, priceConfig = pcall(require, "config")
+if not hasConfig then
+    print("КРИТИЧЕСКАЯ ОШИБКА!")
+    print("Файл config.lua не найден!")
+    print("")
+    print("ME API не возвращает NBT данные (описание предметов).")
+    print("Парсинг цен невозможен.")
+    print("Необходим файл config.lua с ценами!")
+    print("")
+    print("Создайте /home/config.lua по примеру test-config.lua")
+    print("")
+    os.exit(1)
+end
+
+debug("✓ Конфигурационный файл загружен", "SUCCESS")
+
 local config = {
     -- Адреса компонентов (будут определены автоматически)
     meController = nil,
@@ -221,102 +238,6 @@ end
 -- РАБОТА С ME И ПРЕДМЕТАМИ
 -- ============================================
 
-local function parsePrice(lore)
-    if not lore then return nil end
-    
-    debug("  Попытка парсинга цены из lore...", "INFO")
-    
-    -- Попытка 1: "Минимальная цена: 15.0$"
-    for _, line in ipairs(lore) do
-        local price = string.match(line, "Минимальная цена:%s*([%d%.]+)")
-        if price then
-            debug("    ✓ Найдено через 'Минимальная цена': " .. price, "SUCCESS")
-            return tonumber(price)
-        end
-    end
-    
-    -- Попытка 2: "Цена: 15.0$" или "Price: 15.0$"
-    for _, line in ipairs(lore) do
-        local price = string.match(line, "[Цц]ена:%s*([%d%.]+)")
-        if not price then
-            price = string.match(line, "[Pp]rice:%s*([%d%.]+)")
-        end
-        if price then
-            debug("    ✓ Найдено через 'Цена/Price': " .. price, "SUCCESS")
-            return tonumber(price)
-        end
-    end
-    
-    -- Попытка 3: "15.0$" или "$15.0" в строке
-    for _, line in ipairs(lore) do
-        local price = string.match(line, "([%d%.]+)%$")
-        if not price then
-            price = string.match(line, "%$([%d%.]+)")
-        end
-        if price then
-            debug("    ✓ Найдено число с $: " .. price, "SUCCESS")
-            return tonumber(price)
-        end
-    end
-    
-    -- Попытка 4: Просто число с точкой "15.0" или "15.50"
-    for _, line in ipairs(lore) do
-        local price = string.match(line, "([%d]+%.[%d]+)")
-        if price then
-            debug("    ✓ Найдено дробное число: " .. price, "SUCCESS")
-            return tonumber(price)
-        end
-    end
-    
-    debug("    ✗ Цена не найдена в lore", "WARN")
-    return nil
-end
-
-local function getDetailedItemInfo(itemStack)
-    debug("  Получение детальной информации о предмете...", "INFO")
-    
-    local info = {
-        name = itemStack.name,
-        label = itemStack.label or itemStack.name,
-        size = itemStack.size or 0,
-        damage = itemStack.damage or 0,
-        maxSize = itemStack.maxSize or 64,
-        hasTag = itemStack.hasTag or false,
-        price = nil,
-        lore = {}
-    }
-    
-    -- Попытка получить NBT данные
-    if itemStack.hasTag then
-        debug("    Предмет имеет NBT данные", "INFO")
-        
-        -- Попытка получить display.Lore
-        if itemStack.tag and itemStack.tag.display then
-            if itemStack.tag.display.Lore then
-                debug("    Найден tag.display.Lore", "SUCCESS")
-                info.lore = itemStack.tag.display.Lore
-            end
-            if itemStack.tag.display.Name then
-                debug("    Найден tag.display.Name: " .. itemStack.tag.display.Name, "INFO")
-                info.label = itemStack.tag.display.Name
-            end
-        end
-    end
-    
-    -- Пытаемся парсить цену из lore
-    if #info.lore > 0 then
-        debug("    Lore содержит " .. #info.lore .. " строк:", "INFO")
-        for i, line in ipairs(info.lore) do
-            debug("      [" .. i .. "] " .. line, "INFO")
-        end
-        info.price = parsePrice(info.lore)
-    else
-        debug("    Lore пуст или недоступен", "WARN")
-    end
-    
-    return info
-end
-
 local function getItemsFromME()
     debug("Получение списка предметов из ME...", "INFO")
     local items = {}
@@ -326,88 +247,44 @@ local function getItemsFromME()
         return items
     end
     
-    local meItems = me.getItemsInNetwork()
+    -- По офф. документации: getItemsInNetwork() без параметров
+    local success, meItems = pcall(function() return me.getItemsInNetwork() end)
     
-    -- Проверка типа возвращаемого значения
-    if not meItems or type(meItems) ~= "table" then
-        debug("Ошибка: getItemsInNetwork() вернул " .. type(meItems), "ERROR")
-        debug("Попробуйте альтернативный метод...", "WARN")
-        
-        -- Попытка использовать getAvailableItems() как альтернативу
-        if me.getAvailableItems then
-            meItems = me.getAvailableItems()
-            debug("Используется getAvailableItems() вместо getItemsInNetwork()", "INFO")
-        end
-        
-        if not meItems or type(meItems) ~= "table" then
-            debug("ME система не возвращает список предметов!", "ERROR")
-            debug("Убедитесь что ME система включена и содержит предметы", "ERROR")
-            return items
-        end
+    if not success then
+        debug("Ошибка вызова getItemsInNetwork(): " .. tostring(meItems), "ERROR")
+        return items
+    end
+    
+    if type(meItems) ~= "table" then
+        debug("getItemsInNetwork() вернул " .. type(meItems) .. " вместо table", "ERROR")
+        debug("Возможно ME система пустая или нет энергии", "WARN")
+        return items
     end
     
     debug("Найдено предметов в ME: " .. #meItems, "INFO")
-    debug("")
-    debug("=== ДЕТАЛЬНЫЙ АНАЛИЗ ПРЕДМЕТОВ ===", "INFO")
     
-    local pricesFound = 0
-    local pricesMissing = 0
-    
-    for index, item in ipairs(meItems) do
-        debug("")
-        debug("[" .. index .. "/" .. #meItems .. "] Анализ: " .. (item.label or item.name), "INFO")
-        debug("  ID: " .. item.name, "INFO")
-        debug("  Количество: " .. (item.size or 0), "INFO")
-        debug("  Damage: " .. (item.damage or 0), "INFO")
-        debug("  hasTag: " .. tostring(item.hasTag or false), "INFO")
-        
-        -- Получаем детальную информацию
-        local itemInfo = getDetailedItemInfo(item)
-        
-        if itemInfo.price then
-            pricesFound = pricesFound + 1
-            debug("  💰 ЦЕНА НАЙДЕНА: " .. string.format("%.2f", itemInfo.price) .. "$", "SUCCESS")
-        else
-            pricesMissing = pricesMissing + 1
-            -- Используем дефолтную цену для теста
-            itemInfo.price = 10.0
-            debug("  ⚠ Цена не найдена, используем дефолт: 10.0$", "WARN")
-        end
-        
-        table.insert(items, itemInfo)
-        
-        -- Ограничиваем детальный анализ первыми 5 предметами для экономии
-        if index >= 5 then
-            debug("")
-            debug("... (остальные " .. (#meItems - 5) .. " предметов обрабатываются без детального лога)", "INFO")
-            
-            -- Обрабатываем остальные быстро
-            for i = 6, #meItems do
-                local quickItem = meItems[i]
-                local quickInfo = getDetailedItemInfo(quickItem)
-                if not quickInfo.price then
-                    quickInfo.price = 10.0
-                    pricesMissing = pricesMissing + 1
-                else
-                    pricesFound = pricesFound + 1
-                end
-                table.insert(items, quickInfo)
-            end
-            break
-        end
+    if #meItems == 0 then
+        debug("ME система пустая! Положите предметы в систему.", "WARN")
+        return items
     end
     
-    debug("")
-    debug("=== ИТОГИ АНАЛИЗА ===", "INFO")
-    debug("Всего предметов: " .. #items, "INFO")
-    debug("Цены найдены: " .. pricesFound, "SUCCESS")
-    debug("Цены не найдены: " .. pricesMissing, "WARN")
-    if pricesFound > 0 then
-        debug("✓ Парсинг цен работает! (" .. math.floor(pricesFound / #items * 100) .. "%)", "SUCCESS")
-    else
-        debug("✗ Парсинг цен НЕ работает. Используйте конфиг файл!", "ERROR")
+    -- Обрабатываем предметы и получаем цены из конфига
+    for _, item in ipairs(meItems) do
+        local price = priceConfig.getPrice(item.name, item.damage or 0)
+        
+        table.insert(items, {
+            name = item.name,
+            label = item.label or item.name,
+            size = item.size or 0,
+            damage = item.damage or 0,
+            maxSize = item.maxSize or 64,
+            hasTag = item.hasTag or false,
+            price = price
+        })
     end
-    debug("")
+    
+    debug("Обработано " .. #items .. " предметов", "SUCCESS")
+    debug("Все цены получены из config.lua", "INFO")
     
     return items
 end
@@ -570,27 +447,13 @@ local function drawItemList(items, startIndex, selectedIndex)
                 gpu.setBackground(config.colors.bg)
             end
             
-            -- Индикатор цены: ✓ если цена распознана, ? если дефолт
-            local priceIndicator = (item.price and item.price ~= 10.0) and "✓" or "?"
-            
-            local displayText = string.format("%s %-38s %7s шт. %8.2f$", 
-                priceIndicator,
-                unicode.sub(item.label, 1, 38),
+            local displayText = string.format("%-40s %8s шт. %8.2f$", 
+                unicode.sub(item.label, 1, 40),
                 tostring(item.size),
                 item.price or 0)
             
-            -- Цвет цены: зеленый если распознана, серый если дефолт
-            gpu.set(2, y, priceIndicator)
             gpu.setForeground(config.colors.text)
-            gpu.set(4, y, unicode.sub(item.label, 1, 38))
-            gpu.set(43, y, string.format("%7s шт.", tostring(item.size)))
-            
-            if item.price and item.price ~= 10.0 then
-                gpu.setForeground(config.colors.success)
-            else
-                gpu.setForeground(config.colors.secondary)
-            end
-            gpu.set(54, y, string.format("%8.2f$", item.price or 0))
+            gpu.set(2, y, displayText)
         end
     end
     
@@ -621,8 +484,6 @@ local function shopMenu()
         end
         
         gpu.set(2, 6, string.rep("-", 78))
-        gpu.setForeground(config.colors.secondary)
-        gpu.set(2, 7, "✓=цена найдена  ?=дефолт 10$")
         
         drawItemList(filteredItems, startIndex, selectedIndex)
         
