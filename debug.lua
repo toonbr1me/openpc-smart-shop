@@ -96,17 +96,55 @@ for _, meType in ipairs(meTypes) do
         local proxy = component.proxy(addr)
         if proxy and proxy.getItemsInNetwork then
             print("  Вызываю " .. meType .. ".getItemsInNetwork()...")
-            local ok, items = pcall(proxy.getItemsInNetwork)
+            local ok, result = pcall(proxy.getItemsInNetwork)
             if ok then
-                print("  OK! Получено предметов: " .. #items)
-                if #items > 0 then
-                    print("  Первый предмет:")
-                    for k, v in pairs(items[1]) do
-                        print("    " .. tostring(k) .. " = " .. tostring(v))
+                print("  OK! Тип результата: " .. type(result))
+                
+                -- Проверяем что это за объект
+                if type(result) == "table" then
+                    -- Пробуем разные способы получить длину
+                    local countMethod1 = 0
+                    for _ in pairs(result) do countMethod1 = countMethod1 + 1 end
+                    print("  Количество элементов (pairs): " .. countMethod1)
+                    
+                    -- Пробуем итерироваться
+                    print("  Первые 3 элемента:")
+                    local i = 0
+                    for k, v in pairs(result) do
+                        i = i + 1
+                        if i <= 3 then
+                            print("    [" .. tostring(k) .. "] = " .. type(v))
+                            if type(v) == "table" then
+                                for k2, v2 in pairs(v) do
+                                    print("      " .. tostring(k2) .. " = " .. tostring(v2))
+                                end
+                            else
+                                print("      value = " .. tostring(v))
+                            end
+                        end
                     end
+                elseif type(result) == "function" then
+                    print("  Это итератор! Пробуем вызвать...")
+                    local i = 0
+                    for item in result do
+                        i = i + 1
+                        if i <= 3 then
+                            print("    Элемент " .. i .. ":")
+                            if type(item) == "table" then
+                                for k, v in pairs(item) do
+                                    print("      " .. tostring(k) .. " = " .. tostring(v))
+                                end
+                            else
+                                print("      " .. tostring(item))
+                            end
+                        end
+                    end
+                    print("  Всего элементов: " .. i)
+                else
+                    print("  Неизвестный тип: " .. tostring(result))
                 end
             else
-                print("  ОШИБКА: " .. tostring(items))
+                print("  ОШИБКА: " .. tostring(result))
             end
         else
             print("  getItemsInNetwork не найден в " .. meType)
