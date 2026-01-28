@@ -22,14 +22,13 @@ print("✓ Internet Card найдена")
 
 -- Проверка наличия ME компонента
 local me = nil
-if component.isAvailable("me_interface") then
-    me = component.me_interface
-elseif component.isAvailable("me_controller") then
-    me = component.me_controller
-elseif component.isAvailable("me_exportbus") then
-    me = component.me_exportbus
-elseif component.isAvailable("me_importbus") then
-    me = component.me_importbus
+local meTypes = {"me_interface", "me_controller", "me_exportbus", "me_importbus"}
+
+for _, meType in ipairs(meTypes) do
+    if component.isAvailable(meType) then
+        me = component.getPrimary(meType)
+        break
+    end
 end
 
 if me then
