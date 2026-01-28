@@ -64,6 +64,7 @@ local config = {
 
 local gpu = component.gpu
 local me = nil
+local db = nil  -- Database компонент для парсинга NBT
 local transposerMoney = nil
 local transposerOutput = nil
 
@@ -130,6 +131,23 @@ local function initComponents()
     else
         debug("✗ ME Controller не найден!", "ERROR")
         return false
+    end
+    
+    -- Database (опционально, для парсинга NBT)
+    if component.isAvailable("database") then
+        db = component.database
+        debug("✓ Database найден: " .. db.address:sub(1, 8), "SUCCESS")
+        if priceParser then
+            debug("  → Парсинг цен из Lore ДОСТУПЕН", "SUCCESS")
+        end
+    else
+        if priceParser and not hasConfig then
+            debug("✗ Database не найден! Парсинг NBT невозможен!", "ERROR")
+            debug("  Установите Database Upgrade в Adapter", "WARN")
+            return false
+        else
+            debug("⚠ Database не найден, используются цены из config.lua", "WARN")
+        end
     end
     
     -- Transposers для сундуков
@@ -278,9 +296,29 @@ local function getItemsFromME()
         return items
     end
     
-    -- Обрабатываем предметы и получаем цены из конфига
-    for _, item in ipairs(meItems) do
-        local price = priceConfig.getPrice(item.name, item.damage or 0)
+    -- Обрабатываем предметы и получаем цены
+    local usedNBTParsing = false
+    local usedConfigPrices = false
+    local parsedCount = 0
+    local dbSlot = 1  -- Слот для временного хранения в Database
+    
+    for i, item in ipairs(meItems) do
+        local price = nil
+        
+        -- Пытаемся парсить из NBT если доступно
+        if priceParser and db and item.hasTag then
+            price = priceParser.getPriceForItem(me, db, item.name, item.damage or 0, dbSlot)
+            if price then
+                usedNBTParsing = true
+                parsedCount = parsedCount + 1
+            end
+        end
+        
+        -- Fallback на config.lua
+        if not price and hasConfig then
+            price = priceConfig.getPrice(item.name, item.damage or 0)
+            usedConfigPrices = true
+        end
         
         table.insert(items, {
             name = item.name,
@@ -291,10 +329,24 @@ local function getItemsFromME()
             hasTag = item.hasTag or false,
             price = price
         })
+        
+        -- Циклический переход к следующему слоту Database
+        dbSlot = dbSlot + 1
+        if dbSlot > 81 then dbSlot = 1 end
+        
+        -- Задержка каждые 10 предметов при NBT парсинге
+        if i % 10 == 0 and usedNBTParsing then
+            os.sleep(0.05)
+        end
     end
     
     debug("Обработано " .. #items .. " предметов", "SUCCESS")
-    debug("Все цены получены из config.lua", "INFO")
+    if usedNBTParsing then
+        debug("✓ Спарсено из Lore: " .. parsedCount .. " цен", "SUCCESS")
+    end
+    if usedConfigPrices then
+        debug("✓ Загружено из config.lua: " .. (#items - parsedCount) .. " цен", "INFO")
+    end
     
     return items
 end
