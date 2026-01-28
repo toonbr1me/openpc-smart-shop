@@ -20,17 +20,21 @@ end
 
 print("✓ Internet Card найдена")
 
--- Проверка наличия ME компонента
-local me = nil
-local meTypes = {"me_interface", "me_controller", "me_exportbus", "me_importbus"}
-
-for _, meType in ipairs(meTypes) do
-    if component.isAvailable(meType) then
-        me = component.getPrimary(meType)
-        break
+-- Функция для безопасного поиска ME компонента
+local function findMEComponent()
+    local meTypes = {"me_interface", "me_controller", "me_exportbus", "me_importbus"}
+    
+    for _, meType in ipairs(meTypes) do
+        local address = component.list(meType, true)()
+        if address then
+            return component.proxy(address)
+        end
     end
+    
+    return nil
 end
 
+local me = findMEComponent()
 if me then
     print("✓ ME компонент обнаружен: " .. me.type)
 else
