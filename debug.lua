@@ -100,54 +100,85 @@ for _, meType in ipairs(meTypes) do
             if ok then
                 print("  OK! Тип результата: " .. type(result))
                 
-                -- Проверяем что это за объект
-                if type(result) == "table" then
-                    -- Пробуем разные способы получить длину
-                    local countMethod1 = 0
-                    for _ in pairs(result) do countMethod1 = countMethod1 + 1 end
-                    print("  Количество элементов (pairs): " .. countMethod1)
+                -- Безопасно считаем количество через pairs
+                local itemCount = 0
+                local firstItems = {}
+                
+                -- Пробуем ipairs (для массива)
+                print("  Пробуем ipairs...")
+                local ipairsOk, ipairsErr = pcall(function()
+                    for i, item in ipairs(result) do
+                        itemCount = itemCount + 1
+                        if itemCount <= 3 then
+                            table.insert(firstItems, item)
+                        end
+                    end
+                end)
+                
+                if not ipairsOk then
+                    print("  ipairs не сработал: " .. tostring(ipairsErr))
                     
-                    -- Пробуем итерироваться
-                    print("  Первые 3 элемента:")
-                    local i = 0
-                    for k, v in pairs(result) do
-                        i = i + 1
-                        if i <= 3 then
-                            print("    [" .. tostring(k) .. "] = " .. type(v))
-                            if type(v) == "table" then
-                                for k2, v2 in pairs(v) do
-                                    print("      " .. tostring(k2) .. " = " .. tostring(v2))
-                                end
-                            else
-                                print("      value = " .. tostring(v))
+                    -- Пробуем pairs
+                    print("  Пробуем pairs...")
+                    itemCount = 0
+                    local pairsOk, pairsErr = pcall(function()
+                        for k, v in pairs(result) do
+                            itemCount = itemCount + 1
+                            if itemCount <= 3 then
+                                table.insert(firstItems, {key = k, value = v})
                             end
                         end
-                    end
-                elseif type(result) == "function" then
-                    print("  Это итератор! Пробуем вызвать...")
-                    local i = 0
-                    for item in result do
-                        i = i + 1
-                        if i <= 3 then
-                            print("    Элемент " .. i .. ":")
-                            if type(item) == "table" then
-                                for k, v in pairs(item) do
-                                    print("      " .. tostring(k) .. " = " .. tostring(v))
+                    end)
+                    
+                    if not pairsOk then
+                        print("  pairs тоже не сработал: " .. tostring(pairsErr))
+                        
+                        -- Может это callable таблица (итератор)?
+                        print("  Пробуем как итератор...")
+                        local iterOk, iterErr = pcall(function()
+                            for item in result do
+                                itemCount = itemCount + 1
+                                if itemCount <= 3 then
+                                    table.insert(firstItems, item)
                                 end
-                            else
-                                print("      " .. tostring(item))
                             end
+                        end)
+                        
+                        if not iterOk then
+                            print("  Итератор тоже не сработал: " .. tostring(iterErr))
                         end
                     end
-                    print("  Всего элементов: " .. i)
-                else
-                    print("  Неизвестный тип: " .. tostring(result))
+                end
+                
+                print("  Найдено предметов: " .. itemCount)
+                
+                -- Выводим первые предметы
+                if #firstItems > 0 then
+                    print("  Первые предметы:")
+                    for i, item in ipairs(firstItems) do
+                        print("    [" .. i .. "]:")
+                        if type(item) == "table" then
+                            for k, v in pairs(item) do
+                                print("      " .. tostring(k) .. " = " .. tostring(v))
+                            end
+                        else
+                            print("      " .. tostring(item))
+                        end
+                    end
                 end
             else
-                print("  ОШИБКА: " .. tostring(result))
+                print("  ОШИБКА вызова: " .. tostring(result))
             end
         else
             print("  getItemsInNetwork не найден в " .. meType)
+            if proxy then
+                print("  Доступные методы:")
+                for k, v in pairs(proxy) do
+                    if type(v) == "function" then
+                        print("    " .. k .. "()")
+                    end
+                end
+            end
         end
         break
     end
