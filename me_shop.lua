@@ -9,7 +9,16 @@ local text = require("text")
 local serialization = require("serialization")
 
 -- Проверка наличия ME компонента
-local me = component.me_interface or component.me_controller or component.me_exportbus or component.me_importbus
+local me = nil
+if component.isAvailable("me_interface") then
+    me = component.me_interface
+elseif component.isAvailable("me_controller") then
+    me = component.me_controller
+elseif component.isAvailable("me_exportbus") then
+    me = component.me_exportbus
+elseif component.isAvailable("me_importbus") then
+    me = component.me_importbus
+end
 
 if not me then
     print("ОШИБКА: ME компонент не найден!")
