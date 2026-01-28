@@ -13,22 +13,32 @@ local sides = require("sides")
 -- КОНФИГУРАЦИЯ И ИНИЦИАЛИЗАЦИЯ
 -- ============================================
 
--- ВАЖНО: Загрузка конфига с ценами ОБЯЗАТЕЛЬНА!
+-- Загружаем модуль парсинга цен (опционально)
+local priceParser = nil
+local hasPriceParser, parserModule = pcall(require, "price-parser")
+if hasPriceParser then
+    priceParser = parserModule
+    print("✓ Модуль парсинга цен из NBT загружен")
+end
+
+-- Загружаем конфиг с ценами (fallback если парсинг недоступен)
 local hasConfig, priceConfig = pcall(require, "config")
-if not hasConfig then
+if not hasConfig and not hasPriceParser then
     print("КРИТИЧЕСКАЯ ОШИБКА!")
-    print("Файл config.lua не найден!")
+    print("Ни config.lua, ни price-parser.lua не найдены!")
     print("")
-    print("ME API не возвращает NBT данные (описание предметов).")
-    print("Парсинг цен невозможен.")
-    print("Необходим файл config.lua с ценами!")
+    print("Нужен хотя бы один источник цен:")
+    print("1. config.lua - ручные цены (всегда работает)")
+    print("2. price-parser.lua - парсинг из Lore (требует Database)")
     print("")
     print("Создайте /home/config.lua по примеру test-config.lua")
     print("")
     os.exit(1)
 end
 
-debug("✓ Конфигурационный файл загружен", "SUCCESS")
+if hasConfig then
+    print("✓ Конфигурационный файл с ценами загружен")
+end
 
 local config = {
     -- Адреса компонентов (будут определены автоматически)
