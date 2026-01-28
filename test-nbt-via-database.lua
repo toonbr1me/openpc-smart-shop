@@ -35,10 +35,9 @@ end
 
 print("Найдено предметов в ME: " .. #items .. "\n")
 
--- Тестируем больше предметов, особенно с hasTag=true
-local testCount = math.min(10, #items)
-print("Тестируем первые " .. testCount .. " предметов:")
-print("(Ищем предметы с hasTag=true для анализа NBT)\n")
+-- Берём первые 10 предметов для теста
+local testCount = math.min(20, #items)
+print("Тестируем первые " .. testCount .. " предмета:\n")
 
 for i = 1, testCount do
     local item = items[i]
@@ -74,134 +73,86 @@ for i = 1, testCount do
             print("\n  Данные из Database.get(" .. i .. "):")
             print("  ──────────────────────────")
             
-            -- ПОЛНЫЙ ВЫВОД ВСЕХ ПОЛЕЙ С РЕКУРСИЕЙ
-            local function printTable(tbl, indent, maxDepth)
-                indent = indent or "    "
-                maxDepth = maxDepth or 5
-                if maxDepth <= 0 then
-                    print(indent .. "<макс. глубина>")
-                    return
-                end
+            -- ПОЛНЫЙ дамп всех полей
+            print("\n  === ПОЛНЫЙ СПИСОК ВСЕХ ПОЛЕЙ ===")
+            local fieldCount = 0
+            for k, v in pairs(dbItem) do
+                fieldCount = fieldCount + 1
+                local valueType = type(v)
+                print("    [" .. fieldCount .. "] " .. k .. " (" .. valueType .. ")")
                 
-                for k, v in pairs(tbl) do
-                    if type(v) == "table" then
-                        print(indent .. k .. ": <table>")
-                        -- Рекурсивно выводим содержимое
-                        printTable(v, indent .. "  ", maxDepth - 1)
-                    else
-                        print(indent .. k .. ": " .. tostring(v))
-                    end
-                end
-            end
-            
-            printTable(dbItem, "    ", 5)
-            
-            -- Для предметов с hasTag=true выводим сериализованные данные
-            if item.hasTag then
-                print("\n  СЕРИАЛИЗОВАННЫЕ ДАННЫЕ (для отладки):")
-                print("  " .. ("─"):rep(38))
-                local serialized = serialization.serialize(dbItem, math.huge)
-                -- Выводим по частям чтобы не переполнить экран
-                local maxLen = 500
-                if #serialized > maxLen then
-                    print(serialized:sub(1, maxLen))
-                    print("  ... (обрезано, всего " .. #serialized .. " символов)")
-                else
-                    print(serialized)
-                end
-            end
-            
-            -- РЕКУРСИВНЫЙ ПОИСК LORE ВО ВСЕХ ВОЗМОЖНЫХ МЕСТАХ
-            print("\n  Рекурсивный поиск 'Lore' и 'display':")
-            local function findInTable(tbl, path, searchKey)
-                path = path or "dbItem"
-                local found = {}
-                
-                for k, v in pairs(tbl) do
-                    local currentPath = path .. "." .. k
-                    
-                    -- Нашли искомый ключ
-                    if k == searchKey then
-                        table.insert(found, {path = currentPath, value = v})
-                    end
-                    
-                    -- Рекурсивно ищем в подтаблицах
-                    if type(v) == "table" then
-                        local subFound = findInTable(v, currentPath, searchKey)
-                        for _, item in ipairs(subFound) do
-                            table.insert(found, item)
+                if valueType == "table" then
+                    print("        Таблица содержит " .. #v .. " элементов")
+                    -- Рекурсивный вывод вложенных таблиц
+                    for k2, v2 in pairs(v) do
+                        local v2Type = type(v2)
+                        print("          └─ " .. tostring(k2) .. " (" .. v2Type .. ")")
+                        if v2Type == "table" then
+                            for k3, v3 in pairs(v2) do
+                                print("              └─ " .. tostring(k3) .. " (" .. type(v3) .. "): " .. tostring(v3))
+                            end
+                        else
+                            print("              = " .. tostring(v2))
                         end
                     end
+                elseif valueType == "string" or valueType == "number" or valueType == "boolean" then
+                    print("        = " .. tostring(v))
                 end
-                
-                return found
             end
+            print("  Всего полей: " .. fieldCount)
             
-            -- Ищем "Lore"
-            local loreFound = findInTable(dbItem, "dbItem", "Lore")
-            if #loreFound > 0 then
-                print("    ✓ НАЙДЕНО 'Lore' в " .. #loreFound .. " местах:")
-                for _, item in ipairs(loreFound) do
-                    print("      Путь: " .. item.path)
-                    if type(item.value) == "table" then
-                        for idx, line in ipairs(item.value) do
-                            print("        [" .. idx .. "] " .. tostring(line))
-                        end
-                    else
-                        print("        Значение: " .. tostring(item.value))
-                    end
-                end
+            -- Пытаемся полную сериализацию
+            print("\n  === ПОЛНАЯ СЕРИАЛИЗАЦИЯ ===")
+            local serialized = serialization.serialize(dbItem, math.huge)
+            -- Обрезаем если слишком длинное
+            if #serialized > 1000 then
+                print("    " .. serialized:sub(1, 1000) .. "\n    ... (обрезано, всего " .. #serialized .. " символов)")
             else
-                print("    ✗ 'Lore' не найден нигде в структуре")
+                print("    " .. serialized)
             end
             
-            -- Ищем "display"
-            local displayFound = findInTable(dbItem, "dbItem", "display")
-            if #displayFound > 0 then
-                print("\n    ✓ НАЙДЕНО 'display' в " .. #displayFound .. " местах:")
-                for _, item in ipairs(displayFound) do
-                    print("      Путь: " .. item.path)
-                    if type(item.value) == "table" then
-                        for k, v in pairs(item.value) do
-                            print("        " .. k .. ": " .. tostring(v))
-                        end
-                    end
-                end
-            else
-                print("    ✗ 'display' не найден нигде в структуре")
-            end
+            -- Специальная проверка NBT/display/Lore
+            print("\n  === ПОИСК NBT СТРУКТУРЫ ===")
             
-            -- Ищем любые ключи содержащие "lore" (регистронезависимо)
-            print("\n    Поиск ключей содержащих 'lore' (lowercase):")
-            local function findKeysContaining(tbl, path, searchStr)
-                path = path or "dbItem"
-                local found = {}
-                searchStr = searchStr:lower()
-                
-                for k, v in pairs(tbl) do
-                    if type(k) == "string" and k:lower():find(searchStr) then
-                        table.insert(found, {path = path .. "." .. k, key = k, value = v})
-                    end
+            -- Список возможных названий NBT поля
+            local nbtFieldNames = {"tag", "nbt", "NBT", "Tag", "tags", "data", "stackTagCompound"}
+            local foundNBT = false
+            
+            for _, fieldName in ipairs(nbtFieldNames) do
+                if dbItem[fieldName] then
+                    foundNBT = true
+                    print("    ✓ Найдено поле: " .. fieldName)
+                    print("    Тип: " .. type(dbItem[fieldName]))
                     
-                    if type(v) == "table" then
-                        local subFound = findKeysContaining(v, path .. "." .. k, searchStr)
-                        for _, item in ipairs(subFound) do
-                            table.insert(found, item)
+                    if type(dbItem[fieldName]) == "table" then
+                        print("    Содержимое:")
+                        print("    " .. serialization.serialize(dbItem[fieldName], 2))
+                        
+                        -- Ищем display
+                        if dbItem[fieldName].display then
+                            print("    ✓✓ display найден!")
+                            
+                            -- Ищем Lore
+                            if dbItem[fieldName].display.Lore then
+                                print("    ✓✓✓ LORE НАЙДЕН!")
+                                print("\n    === СОДЕРЖИМОЕ LORE ===")
+                                if type(dbItem[fieldName].display.Lore) == "table" then
+                                    for idx, line in ipairs(dbItem[fieldName].display.Lore) do
+                                        print("      [" .. idx .. "] " .. line)
+                                    end
+                                else
+                                    print("      " .. tostring(dbItem[fieldName].display.Lore))
+                                end
+                            end
                         end
                     end
                 end
-                
-                return found
             end
             
-            local loreKeys = findKeysContaining(dbItem, "dbItem", "lore")
-            if #loreKeys > 0 then
-                print("    ✓ Найдено ключей с 'lore': " .. #loreKeys)
-                for _, item in ipairs(loreKeys) do
-                    print("      " .. item.path)
-                end
-            else
-                print("    ✗ Ключей содержащих 'lore' не найдено")
+            if not foundNBT then
+                print("    ✗ NBT поля не найдены")
+                print("    Проверенные варианты: " .. table.concat(nbtFieldNames, ", "))
+                print("    (Предмет возможно не имеет NBT или API не возвращает его)")
             end
             
             -- Вычисляем хеш для сравнения
@@ -220,19 +171,11 @@ for i = 1, testCount do
 end
 
 print("\n=== Тест завершён ===")
-print("\nЧТО ПРОВЕРЯЛОСЬ:")
-print("1. ВСЕ поля из db.get() с рекурсивным выводом (глубина 5)")
-print("2. Рекурсивный поиск 'Lore' во всей структуре")
-print("3. Рекурсивный поиск 'display' во всей структуре")
-print("4. Поиск любых ключей содержащих 'lore'")
-print("5. Сериализованный вывод для hasTag=true предметов")
-print("")
-print("ВЫВОДЫ:")
-print("• Если 'Lore' НЕ найден - предметы не имеют описания на сервере")
-print("• Если 'display' НЕ найден - NBT структура отличается от стандартной")
-print("• hasTag=true указывает что NBT есть, но может не содержать Lore")
-print("")
-print("СЛЕДУЮЩИЕ ШАГИ:")
-print("1. Если Lore найден → используйте price-parser.lua")
-print("2. Если Lore НЕ найден → используйте config.lua с ценами")
-print("3. Попросите админа добавить Lore к предметам на сервере")
+print("\nВЫВОДЫ:")
+print("1. Если видите NBT поле с display.Lore - парсинг ВОЗМОЖЕН!")
+print("2. Если все предметы без NBT - проверьте:")
+print("   - Версию OpenComputers (нужна 1.7.5+)")
+print("   - Версию AE2 (нужна rv6)")
+print("   - Предметы должны иметь описание на сервере")
+print("3. Используйте полную сериализацию чтобы увидеть структуру")
+print("4. Если hasTag=true но NBT пустой - возможно ограничение API")
