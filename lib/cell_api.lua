@@ -24,6 +24,14 @@ function cellAPI.getInventorySize(side)
     return cellAPI.transposer.getInventorySize(side)
 end
 
+-- Получить стек из слота
+function cellAPI.getStackInSlot(side, slot)
+    if not cellAPI.transposer then
+        return nil, "Транспозер не инициализирован"
+    end
+    return cellAPI.transposer.getStackInSlot(side, slot)
+end
+
 -- Получить все предметы из инвентаря (ячейки)
 function cellAPI.getAllItems(side)
     if not cellAPI.transposer then

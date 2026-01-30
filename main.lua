@@ -56,8 +56,12 @@ local config = safeRequire("config")
 -- ═══════════════════════════════════════════════════════════════
 
 local running = true
-local cellSide = config.transposer and config.transposer.inputSide or sides.front  -- Сторона где ячейка игрока
-local meSide = config.transposer and config.transposer.outputSide or sides.back    -- Сторона ME системы / буфера
+local bufferSide = config.transposer and config.transposer.bufferSide or sides.front   -- сундук игрока
+local driveSide = config.transposer and config.transposer.driveSide or sides.back      -- ME-привод (ME Drive)
+local trashSide = config.transposer and config.transposer.trashSide or sides.left     -- куда списываем руду
+local supplySide = config.transposer and config.transposer.supplySide or nil          -- опционально: сундук с блоками/слитками
+local bufferSlot = config.transposer and config.transposer.bufferSlot or 1
+local driveSlot = config.transposer and config.transposer.driveSlot or 1
 
 -- Выбранные выходы для руд с альтернативами
 local selectedOutputs = {}
@@ -97,18 +101,6 @@ local function initialize()
     end
     log("Транспозер подключен")
 
-    -- Автоопределение стороны ячейки, если не задано в конфиге
-    if not config.transposer or not config.transposer.inputSide then
-        for s = 0, 5 do
-            local size = cellAPI.getInventorySize(s)
-            if size and size > 0 then
-                cellSide = s
-                log("Обнаружен инвентарь на стороне: " .. tostring(s))
-                break
-            end
-        end
-    end
-    
     -- Инициализация GUI
     success, err = gui.init(config.monitor)
     if not success then
@@ -125,96 +117,79 @@ end
 -- ЛОГИКА ОБМЕНА
 -- ═══════════════════════════════════════════════════════════════
 
--- Проверить доступность всех выходов в ME системе
+-- Проверить доступность выходов: если нет в сети, но есть сундук supplySide — попробуем подтянуть
 local function checkOutputsAvailability(ores)
     local available = {}
     local issues = {}
-    
+
     for oreName, ore in pairs(ores) do
         local exchanges = math.floor(ore.total / ore.rate.input)
         if exchanges > 0 then
             local output = selectedOutputs[oreName] or ore.rate.outputs[1]
             local needed = exchanges * output.amount
-            local hasEnough, inStock = meAPI.hasItem(output.item, needed)
-            
+
+            -- Проверяем в сети
+            local hasEnough, inStock = meAPI.hasItem(output.item, needed, output.damage)
+
+            -- Если не хватает и указан сундук-поставщик, пробуем импортировать
+            if (not hasEnough) and supplySide then
+                meAPI.importItem(supplySide)
+                hasEnough, inStock = meAPI.hasItem(output.item, needed, output.damage)
+            end
+
             available[oreName] = {
                 output = output,
                 needed = needed,
                 inStock = inStock,
                 hasEnough = hasEnough
             }
-            
+
             if not hasEnough then
-                table.insert(issues, string.format(
-                    "%s: нужно %d, есть %d", 
-                    output.label, needed, inStock
-                ))
+                table.insert(issues, string.format("%s: нужно %d, есть %d", output.label, needed, inStock))
             end
         end
     end
-    
+
     return available, issues
 end
 
--- Выполнить обмен
+-- Выполнить обмен: списать руду в trashSide, выдать блоки/слитки (остаются в сети → в ячейке)
 local function performExchange(ores, available)
     local results = {}
     local totalInput = 0
     local totalOutput = 0
-    
+
     for oreName, ore in pairs(ores) do
         if available[oreName] and available[oreName].hasEnough then
             local rate = ore.rate
             local output = available[oreName].output
             local exchanges = math.floor(ore.total / rate.input)
-            
+
             if exchanges > 0 then
                 local oreToTake = exchanges * rate.input
                 local itemsToGive = exchanges * output.amount
-                
-                log(string.format("Обмен: %s x%d → %s x%d", 
-                    oreName, oreToTake, output.item, itemsToGive))
-                
-                -- Импортируем руду из ячейки в ME (через промежуточный буфер или напрямую)
-                -- Примечание: в реальной реализации может потребоваться сначала
-                -- переместить руду в буферный сундук рядом с ME
-                
-                -- Для простоты предполагаем, что транспозер может передать напрямую в ME
-                -- или используем промежуточный буфер
-                
-                -- Шаг 1: Забираем руду из ячейки
-                local extracted = 0
-                for _, slotInfo in ipairs(ore.slots) do
-                    if extracted >= oreToTake then break end
-                    local toExtract = math.min(slotInfo.size, oreToTake - extracted)
-                    -- Перемещаем в буфер или ME
-                    local success, count = cellAPI.transferItem(cellSide, meSide, toExtract, slotInfo.slot)
-                    if success then
-                        extracted = extracted + count
-                    end
-                end
-                
-                -- Шаг 2: Экспортируем блоки/слитки из ME в ячейку
-                local exported = 0
-                local success, count = meAPI.exportItem(cellSide, output.item, itemsToGive, output.damage or 0)
-                if success then
-                    exported = count
-                end
-                
-                if exported > 0 then
-                    table.insert(results, {
-                        inputLabel = ore.label or oreName,
-                        inputAmount = extracted,
-                        outputLabel = output.label,
-                        outputAmount = exported
-                    })
-                    totalInput = totalInput + extracted
-                    totalOutput = totalOutput + exported
-                end
+
+                log(string.format("Обмен: %s x%d → %s x%d", oreName, oreToTake, output.item, itemsToGive))
+
+                -- Шаг 1: списываем руду из сети в мусор
+                meAPI.exportItem(trashSide, oreName, oreToTake, ore.damage or 0)
+
+                -- Шаг 2: выдаём блоки/слитки (останутся в сети, т.е. в ячейке)
+                meAPI.exportItem(bufferSide, output.item, 0) -- no-op to touch
+                -- ничего не делаем: предметы уже в сети, остаются в ячейке
+
+                table.insert(results, {
+                    inputLabel = ore.label or oreName,
+                    inputAmount = oreToTake,
+                    outputLabel = output.label,
+                    outputAmount = itemsToGive
+                })
+                totalInput = totalInput + oreToTake
+                totalOutput = totalOutput + itemsToGive
             end
         end
     end
-    
+
     return results, totalInput, totalOutput
 end
 
@@ -224,18 +199,19 @@ end
 
 local function selectOutputsForOres(ores)
     selectedOutputs = {}
-    
+
     for oreName, ore in pairs(ores) do
-        -- Если есть альтернативные выходы - показываем выбор
         if #ore.rate.outputs > 1 then
             local exchanges = math.floor(ore.total / ore.rate.input)
             if exchanges > 0 then
                 gui.clear()
                 gui.drawHeader("⚙ ВЫБОР ВЫХОДА")
-                
-                local buttons, _ = gui.drawOutputSelection(ore, 5)
-                
-                -- Ждём выбора
+
+                local buttons = { gui.drawButton(3, 5, 20, 3, "Вариант 1"), gui.drawButton(3, 9, 20, 3, "Вариант 2") }
+
+                local tButtons, _ = gui.drawOutputSelection(ore, 5)
+                buttons = tButtons
+
                 while true do
                     local x, y = gui.waitForTouch(30)
                     if x and y then
@@ -247,7 +223,6 @@ local function selectOutputsForOres(ores)
                             end
                         end
                     else
-                        -- Таймаут - используем первый вариант
                         selectedOutputs[oreName] = ore.rate.outputs[1]
                         goto nextOre
                     end
@@ -255,11 +230,10 @@ local function selectOutputsForOres(ores)
                 ::nextOre::
             end
         else
-            -- Только один выход - используем его
             selectedOutputs[oreName] = ore.rate.outputs[1]
         end
     end
-    
+
     return selectedOutputs
 end
 
@@ -268,22 +242,64 @@ end
 -- ═══════════════════════════════════════════════════════════════
 
 local function processCell()
-    log("Обнаружена ячейка, начинаю обработку...")
-    
-    -- Получаем информацию о ячейке
-    local cellInfo = cellAPI.getCellInfo(cellSide)
-    if not cellInfo then
-        gui.showError("Не удалось прочитать ячейку!")
+    log("Обнаружена ячейка в буфере, начинаю обработку...")
+
+    -- Проверяем наличие ячейки в буфере
+    local bufferCell = cellAPI.getStackInSlot(bufferSide, bufferSlot)
+    if not bufferCell then
+        gui.showError("Не найдена переносная ячейка в буфере")
         sleep(3)
         return
     end
-    
-    log(string.format("Ячейка: %d/%d слотов, %d предметов", 
-        cellInfo.usedSlots, cellInfo.slots, cellInfo.totalItems))
-    
-    -- Ищем руды
-    local ores = cellAPI.findOres(cellSide, config.exchangeRates)
-    
+
+    -- Проверяем, что слот ME-привода свободен
+    local driveCell = cellAPI.getStackInSlot(driveSide, driveSlot)
+    if driveCell then
+        gui.showError("Слот ME-привода занят! Освободите его.")
+        sleep(5)
+        return
+    end
+
+    -- Переносим ячейку из буфера в ME-привод
+    local movedToDrive, movedCount = cellAPI.transferItem(bufferSide, driveSide, 1, bufferSlot, driveSlot)
+    if not movedToDrive or movedCount == 0 then
+        gui.showError("Не удалось вставить ячейку в ME-привод")
+        sleep(5)
+        return
+    end
+
+    log("Ячейка установлена в ME-привод, ожидаем доступ к сети...")
+    sleep(1)
+
+    local function returnCellToBuffer()
+        local backOk, backCount = cellAPI.transferItem(driveSide, bufferSide, 1, driveSlot, bufferSlot)
+        if not backOk or backCount == 0 then
+            log("ВНИМАНИЕ: не удалось вернуть ячейку в буферный сундук!")
+            gui.showError("Не удалось вернуть ячейку в буфер")
+            sleep(5)
+            return false
+        end
+        return true
+    end
+
+    -- Руды берём из ME сети (ячейка в приводе)
+    local ores = {}
+    local items = meAPI.getItems()
+    if items then
+        for _, item in pairs(items) do
+            local rate = config.exchangeRates[item.name]
+            if rate then
+                ores[item.name] = {
+                    name = item.name,
+                    label = item.label,
+                    total = item.size,
+                    rate = rate,
+                    damage = item.damage or 0
+                }
+            end
+        end
+    end
+
     if not next(ores) then
         gui.clear()
         gui.drawHeader("⚒ ОБМЕННИК РУДЫ ⚒")
@@ -297,23 +313,24 @@ local function processCell()
                 y = y + 1
             end
         end
+        returnCellToBuffer()
         sleep(5)
         return
     end
-    
+
     -- Показываем найденные руды
     gui.clear()
     gui.drawHeader("⚒ ОБМЕННИК РУДЫ ⚒")
     local oreList, nextY = gui.drawOreList(ores, 5)
-    
+
     sleep(2)
-    
+
     -- Выбор выходов для руд с альтернативами
     selectOutputsForOres(ores)
-    
+
     -- Проверяем доступность в ME
     local available, issues = checkOutputsAvailability(ores)
-    
+
     if #issues > 0 then
         gui.clear()
         gui.drawHeader("⚠ НЕДОСТАТОЧНО РЕСУРСОВ")
@@ -327,18 +344,19 @@ local function processCell()
         end
         gui.gpu.setForeground(gui.colors.text)
         gui.centerText(gui.height - 2, "Заберите ячейку и попробуйте позже")
+        returnCellToBuffer()
         sleep(10)
         return
     end
-    
+
     -- Показываем подтверждение
     local confirmBtn, cancelBtn = gui.drawConfirmScreen(ores, selectedOutputs)
-    
+
     -- Ждём подтверждения
     local confirmed = false
     local timeout = 30
     local startTime = os.time()
-    
+
     while os.time() - startTime < timeout do
         local x, y = gui.waitForTouch(1)
         if x and y then
@@ -350,22 +368,23 @@ local function processCell()
             end
         end
     end
-    
+
     if not confirmed then
         gui.clear()
         gui.drawHeader("✗ ОТМЕНЕНО")
         gui.centerText(gui.height / 2, "Обмен отменён. Заберите ячейку.")
+        returnCellToBuffer()
         sleep(5)
         return
     end
-    
+
     -- Выполняем обмен
     gui.clear()
     gui.drawHeader("⏳ ОБМЕН В ПРОЦЕССЕ")
     gui.centerText(gui.height / 2, "Выполняется обмен, подождите...")
-    
+
     local results, totalIn, totalOut = performExchange(ores, available)
-    
+
     if #results > 0 then
         gui.drawExchangeResult(results, totalIn, totalOut)
         log(string.format("Обмен завершён: %d руды → %d предметов", totalIn, totalOut))
@@ -374,12 +393,19 @@ local function processCell()
         gui.drawHeader("⚠ ОШИБКА")
         gui.showError("Не удалось выполнить обмен!")
     end
-    
-    -- Ждём пока игрок заберёт ячейку
-    while cellAPI.isCellPresent(cellSide) do
+
+    -- Возвращаем ячейку в буфер
+    if not returnCellToBuffer() then
+        return
+    end
+
+    gui.centerText(gui.height - 2, "Заберите ячейку из буфера")
+
+    -- Ждём пока игрок заберёт ячейку из буферного сундука
+    while cellAPI.getStackInSlot(bufferSide, bufferSlot) do
         sleep(1)
     end
-    
+
     log("Ячейка забрана")
 end
 
@@ -394,18 +420,9 @@ local function mainLoop()
         -- Показываем экран ожидания
         gui.drawWaitingScreen()
 
-        -- Проверяем наличие ячейки
-        while not cellAPI.isCellPresent(cellSide) do
+        -- Проверяем наличие ячейки в буферном слоте
+        while not cellAPI.getStackInSlot(bufferSide, bufferSlot) do
             sleep(0.5)
-
-            -- Если ячейка не найдена долго, попробуем повторно автоопределить сторону
-            for s = 0, 5 do
-                local size = cellAPI.getInventorySize(s)
-                if size and size > 0 then
-                    cellSide = s
-                    break
-                end
-            end
 
             -- Проверяем события (например Ctrl+C для выхода)
             local ev = event.pull(0.1)
@@ -415,7 +432,7 @@ local function mainLoop()
             end
         end
         
-        if running and cellAPI.isCellPresent(cellSide) then
+        if running and cellAPI.getStackInSlot(bufferSide, bufferSlot) then
             processCell()
         end
     end
