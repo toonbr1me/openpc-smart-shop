@@ -21,11 +21,21 @@ local component = require("component")
 local event = require("event")
 local sides = require("sides")
 local os = require("os")
+local filesystem = require("filesystem")
+local shell = require("shell")
 
--- Загрузка модулей
+-- Определяем директорию скрипта и добавляем в package.path
+local scriptPath = shell.resolve(debug.getinfo(1, "S").source:sub(2))
+local scriptDir = filesystem.path(scriptPath) or "/home/ore-exchange/"
+
+-- Добавляем путь к библиотекам
+package.path = package.path .. ";" .. scriptDir .. "?.lua;" .. scriptDir .. "?/init.lua"
+
+-- Загрузка модулей (сбрасываем кеш)
 package.loaded["lib.me_api"] = nil
 package.loaded["lib.cell_api"] = nil
 package.loaded["lib.gui"] = nil
+package.loaded["config"] = nil
 
 local meAPI = require("lib.me_api")
 local cellAPI = require("lib.cell_api")
