@@ -20,26 +20,22 @@
 local component = require("component")
 local event = require("event")
 local sides = require("sides")
-local os = require("os")
-local filesystem = require("filesystem")
-local shell = require("shell")
 
--- Определяем директорию скрипта и добавляем в package.path
-local scriptPath = shell.resolve(debug.getinfo(1, "S").source:sub(2))
-local scriptDir = filesystem.path(scriptPath) or "/home/ore-exchange/"
+-- Путь установки программы
+local INSTALL_DIR = "/home/ore-exchange/"
 
--- Добавляем путь к библиотекам
-package.path = package.path .. ";" .. scriptDir .. "?.lua;" .. scriptDir .. "?/init.lua"
+-- Добавляем путь к библиотекам в package.path
+package.path = package.path .. ";" .. INSTALL_DIR .. "?.lua;" .. INSTALL_DIR .. "lib/?.lua"
 
--- Загрузка модулей (сбрасываем кеш)
-package.loaded["lib.me_api"] = nil
-package.loaded["lib.cell_api"] = nil
-package.loaded["lib.gui"] = nil
+-- Загрузка модулей (сбрасываем кеш для перезагрузки)
+package.loaded["me_api"] = nil
+package.loaded["cell_api"] = nil
+package.loaded["gui"] = nil
 package.loaded["config"] = nil
 
-local meAPI = require("lib.me_api")
-local cellAPI = require("lib.cell_api")
-local gui = require("lib.gui")
+local meAPI = require("me_api")
+local cellAPI = require("cell_api")
+local gui = require("gui")
 local config = require("config")
 
 -- ═══════════════════════════════════════════════════════════════
