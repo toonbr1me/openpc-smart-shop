@@ -20,23 +20,36 @@
 local component = require("component")
 local event = require("event")
 local sides = require("sides")
+local shell = require("shell")
 
--- Путь установки программы
+-- Путь установки программы (фиксированный)
 local INSTALL_DIR = "/home/ore-exchange/"
 
 -- Добавляем путь к библиотекам в package.path
 package.path = package.path .. ";" .. INSTALL_DIR .. "?.lua;" .. INSTALL_DIR .. "lib/?.lua"
 
--- Загрузка модулей (сбрасываем кеш для перезагрузки)
+-- Сбрасываем кеш модулей
 package.loaded["me_api"] = nil
 package.loaded["cell_api"] = nil
 package.loaded["gui"] = nil
 package.loaded["config"] = nil
 
-local meAPI = require("me_api")
-local cellAPI = require("cell_api")
-local gui = require("gui")
-local config = require("config")
+-- Безопасный require с понятной ошибкой
+local function safeRequire(name)
+    local ok, mod = pcall(require, name)
+    if not ok then
+        error("Не удалось загрузить '" .. name .. "': " .. tostring(mod))
+    end
+    return mod
+end
+
+-- Меняем рабочую директорию, чтобы относительные пути работали
+pcall(shell.setWorkingDirectory, INSTALL_DIR)
+
+local meAPI = safeRequire("me_api")
+local cellAPI = safeRequire("cell_api")
+local gui = safeRequire("gui")
+local config = safeRequire("config")
 
 -- ═══════════════════════════════════════════════════════════════
 -- ОСНОВНЫЕ ПЕРЕМЕННЫЕ
