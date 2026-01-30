@@ -56,8 +56,8 @@ local config = safeRequire("config")
 -- ═══════════════════════════════════════════════════════════════
 
 local running = true
-local cellSide = sides.front  -- Сторона где ячейка игрока
-local meSide = sides.back     -- Сторона ME системы
+local cellSide = config.transposer and config.transposer.inputSide or sides.front  -- Сторона где ячейка игрока
+local meSide = config.transposer and config.transposer.outputSide or sides.back    -- Сторона ME системы / буфера
 
 -- Выбранные выходы для руд с альтернативами
 local selectedOutputs = {}
@@ -96,6 +96,18 @@ local function initialize()
         return false
     end
     log("Транспозер подключен")
+
+    -- Автоопределение стороны ячейки, если не задано в конфиге
+    if not config.transposer or not config.transposer.inputSide then
+        for s = 0, 5 do
+            local size = cellAPI.getInventorySize(s)
+            if size and size > 0 then
+                cellSide = s
+                log("Обнаружен инвентарь на стороне: " .. tostring(s))
+                break
+            end
+        end
+    end
     
     -- Инициализация GUI
     success, err = gui.init(config.monitor)
@@ -381,11 +393,20 @@ local function mainLoop()
     while running do
         -- Показываем экран ожидания
         gui.drawWaitingScreen()
-        
+
         -- Проверяем наличие ячейки
         while not cellAPI.isCellPresent(cellSide) do
             sleep(0.5)
-            
+
+            -- Если ячейка не найдена долго, попробуем повторно автоопределить сторону
+            for s = 0, 5 do
+                local size = cellAPI.getInventorySize(s)
+                if size and size > 0 then
+                    cellSide = s
+                    break
+                end
+            end
+
             -- Проверяем события (например Ctrl+C для выхода)
             local ev = event.pull(0.1)
             if ev == "interrupted" then
