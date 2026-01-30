@@ -69,7 +69,7 @@ local function printHeader()
     setColor(colors.header)
     print("╔═══════════════════════════════════════════════════════════════╗")
     print("║                                                               ║")
-    print("║           ⚒  УСТАНОВЩИК ОБМЕННИКА РУДЫ  ⚒                    ║")
+    print("║           ⚒  УСТАНОВЩИК ОБМЕННИКА РУДЫ  ⚒                   ║")
     print("║              OpenComputers + AE2/ME                           ║")
     print("║                                                               ║")
     print("╚═══════════════════════════════════════════════════════════════╝")
@@ -145,12 +145,17 @@ local function checkRequirements()
         printSuccess("ME система обнаружена")
     end
     
-    -- Проверяем место на диске
-    local freeSpace = filesystem.spaceTotal("/") - filesystem.spaceUsed("/")
-    if freeSpace < 50000 then
-        table.insert(issues, "Недостаточно места на диске!")
+    -- Проверяем место на диске (используем правильный API)
+    local fs = component.filesystem or (component.isAvailable("filesystem") and component.proxy(component.list("filesystem")()))
+    if fs and fs.spaceTotal and fs.spaceUsed then
+        local freeSpace = fs.spaceTotal() - fs.spaceUsed()
+        if freeSpace < 50000 then
+            printWarning("Мало места на диске")
+        else
+            printSuccess(string.format("Свободно %.1f KB на диске", freeSpace / 1024))
+        end
     else
-        printSuccess(string.format("Свободно %.1f KB на диске", freeSpace / 1024))
+        printSuccess("Проверка диска пропущена")
     end
     
     print()
